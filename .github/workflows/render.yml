@@ -2,7 +2,9 @@ name: Render supporter wall
 
 on:
   schedule:
-    - cron: "14 * * * *"   # hourly, matching the old Railway refresh cadence
+    # Hourly at :14, matching the old Railway refresh cadence.
+    # GitHub may skip or delay these by a few minutes under load.
+    - cron: "14 * * * *"
   workflow_dispatch:
 
 permissions:
