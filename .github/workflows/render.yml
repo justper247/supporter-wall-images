@@ -1,0 +1,68 @@
+name: Render supporter wall
+
+on:
+  schedule:
+    - cron: "14 * * * *"   # hourly, matching the old Railway refresh cadence
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deployments race — this was the cause of the old
+# "pages build and deployment" failure emails.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    # Same image + font packages as the old Railway Dockerfile, so glyph
+    # rendering (CJK, emoji, symbols) is byte-identical.
+    container: node:20-slim
+    timeout-minutes: 15
+    steps:
+      - name: Install fonts
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends \
+            fonts-noto \
+            fonts-noto-cjk \
+            fonts-noto-cjk-extra \
+            fonts-noto-core \
+            fonts-noto-extra \
+            fonts-noto-mono \
+            fonts-noto-ui-core \
+            fonts-noto-ui-extra \
+            fonts-noto-unhinted \
+            fonts-noto-color-emoji \
+            fonts-symbola \
+            fonts-tibetan-machine \
+            fonts-sil-padauk \
+            fontconfig \
+            ca-certificates \
+          && fc-cache -fv
+
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm install --no-save --no-audit --no-fund "@napi-rs/canvas@^0.1.65"
+
+      - name: Render PNGs
+        run: node render.js
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: render
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
