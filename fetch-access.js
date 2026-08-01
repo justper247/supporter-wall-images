@@ -32,13 +32,16 @@ async function get(url) {
   return res.text();
 }
 
-// A list is only worth publishing if it has rows, or if auto-access is switched off
-// (header is "Name" alone in that case, and an empty list is then correct).
-function usable(text) {
+// A successful response is AUTHORITATIVE, even with zero supporters - otherwise
+// removing somebody's role could never revoke their access, because the last list
+// that happened to contain them would be republished forever.
+//
+// The "don't publish garbage" guard lives in the worker instead, which is the only
+// layer that can tell "nobody qualifies" apart from "Discord call failed".
+// Here we only sanity-check the shape.
+function looksValid(text) {
   const rows = text.trim().split("\n").filter(Boolean);
-  if (rows.length === 0) return false;
-  const accessOn = rows[0].includes(",");
-  return !accessOn || rows.length > 1;
+  return rows.length > 0 && rows[0].startsWith("Name");
 }
 
 function write(text, note) {
@@ -56,22 +59,23 @@ function write(text, note) {
     console.warn("[Access] worker unreachable: " + err.message);
   }
 
-  if (fresh !== null && usable(fresh)) {
+  if (fresh !== null && looksValid(fresh)) {
     write(fresh, "fresh from worker");
     return;
   }
 
   if (fresh !== null) {
-    console.warn("[Access] worker returned an empty list - keeping the published one instead.");
+    console.warn("[Access] worker response was malformed - keeping the published one instead.");
   }
 
+  // Only reached when the worker is unreachable or sent something unrecognisable.
   try {
     const previous = await get(PUBLISHED_URL);
-    if (usable(previous)) {
-      write(previous, "REUSED previously published list");
+    if (looksValid(previous)) {
+      write(previous, "REUSED previously published list (worker unavailable)");
       return;
     }
-    console.warn("[Access] previously published list is empty too.");
+    console.warn("[Access] previously published list is unusable too.");
   } catch (err) {
     console.warn("[Access] no previously published list: " + err.message);
   }
