@@ -7,43 +7,81 @@
 // small set of trusted domains (github.io among them), which is the same reason the
 // wall PNGs are published here rather than served straight from the worker.
 //
-// Safety: if the worker is unreachable or returns a broken list, this FAILS the run
-// on purpose. A failed run leaves the previous Pages deployment in place, so the
-// world keeps reading the last good list. Publishing an empty list instead would
-// lock every supporter out of the avatar wall.
+// This step must NEVER fail the run. The supporter wall images and the world access
+// list are independent features that happen to share a deployment - an access problem
+// blocking the wall render (which is what happened on 2026-08-01) is worse than the
+// access list being briefly stale.
+//
+// Order of preference:
+//   1. a good fresh list from the worker
+//   2. the list currently published on Pages (keeps access working during an outage)
+//   3. nothing, with a loud warning - images still deploy
 
 const fs = require("fs");
 const path = require("path");
 
-const URL = process.env.ACCESS_URL ||
+const WORKER_URL = process.env.ACCESS_URL ||
   "https://supporter-wall.justper247.workers.dev/supporters.csv";
+const PUBLISHED_URL = process.env.PUBLISHED_ACCESS_URL ||
+  "https://justper247.github.io/supporter-wall-images/supporters.csv";
 const OUT_DIR = process.env.OUT_DIR || "site";
 
-(async () => {
-  const res = await fetch(URL);
-  if (!res.ok) throw new Error("worker returned HTTP " + res.status);
+async function get(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.text();
+}
 
-  const text = await res.text();
+// A list is only worth publishing if it has rows, or if auto-access is switched off
+// (header is "Name" alone in that case, and an empty list is then correct).
+function usable(text) {
   const rows = text.trim().split("\n").filter(Boolean);
-  if (rows.length === 0) throw new Error("empty response from worker");
-
-  // Header is "Name" alone when auto-access is switched off, and
-  // "Name,<Role>,..." when it is on. Only demand supporters in the second case,
-  // otherwise turning access off would fail this run forever and block the wall
-  // images from updating too.
+  if (rows.length === 0) return false;
   const accessOn = rows[0].includes(",");
-  const supporters = rows.length - 1;
-  if (accessOn && supporters === 0) {
-    throw new Error("auto-access is on but the list is empty - refusing to publish");
-  }
+  return !accessOn || rows.length > 1;
+}
 
+function write(text, note) {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   fs.writeFileSync(path.join(OUT_DIR, "supporters.csv"), text);
-  console.log(
-    "[Access] wrote supporters.csv - " +
-    (accessOn ? supporters + " supporter(s)" : "auto-access is off, empty list")
+  const rows = text.trim().split("\n").filter(Boolean).length - 1;
+  console.log(`[Access] published supporters.csv (${rows} supporter(s)) - ${note}`);
+}
+
+(async () => {
+  let fresh = null;
+  try {
+    fresh = await get(WORKER_URL);
+  } catch (err) {
+    console.warn("[Access] worker unreachable: " + err.message);
+  }
+
+  if (fresh !== null && usable(fresh)) {
+    write(fresh, "fresh from worker");
+    return;
+  }
+
+  if (fresh !== null) {
+    console.warn("[Access] worker returned an empty list - keeping the published one instead.");
+  }
+
+  try {
+    const previous = await get(PUBLISHED_URL);
+    if (usable(previous)) {
+      write(previous, "REUSED previously published list");
+      return;
+    }
+    console.warn("[Access] previously published list is empty too.");
+  } catch (err) {
+    console.warn("[Access] no previously published list: " + err.message);
+  }
+
+  // Nothing good to publish. Do not fail - the wall images must still deploy.
+  console.warn(
+    "[Access] WARNING: no supporters.csv published this run. The world will fall back " +
+    "to its keypad until this is fixed."
   );
 })().catch((err) => {
-  console.error("[Access] " + err.message);
-  process.exit(1);
+  // Even an unexpected crash must not block the wall deployment.
+  console.warn("[Access] unexpected error, continuing: " + err.message);
 });
