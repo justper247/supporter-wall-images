@@ -54,6 +54,11 @@ jobs:
       - name: Render PNGs
         run: node render.js
 
+      # Publishes the VRChat world's supporter access list alongside the images.
+      # VRChat won't fetch from workers.dev, so it has to be served from github.io.
+      - name: Fetch supporter access list
+        run: node fetch-access.js
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
