@@ -1,10 +1,13 @@
 name: Render supporter wall
 
 on:
-  schedule:
-    # Hourly at :14, matching the old Railway refresh cadence.
-    # GitHub may skip or delay these by a few minutes under load.
-    - cron: "14 * * * *"
+  # Only ever started by the supporter-wall worker (its hourly cron, access-list changes,
+  # and the dashboard's Refresh button), via the workflow_dispatch API.
+  #
+  # Deliberately NO schedule: trigger. GitHub disables scheduled workflows in public
+  # repos after 60 days without a commit, and a disabled workflow also rejects the
+  # worker's dispatches - so the wall images would silently freeze. GitHub's cron was
+  # also too unreliable to be the clock (skipped and late runs).
   workflow_dispatch:
 
 permissions:
