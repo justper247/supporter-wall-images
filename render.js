@@ -71,14 +71,41 @@ function parse(text) {
   return r;
 }
 
-// ── Emoji detection ──────────────────────────────────────────────────────────
-// Color emojis render ~2x taller than text, causing spacing issues.
-// Detect them so we can shrink those names to keep consistent line height.
+// ── Name layout ─────────────────────────────────────────────────────────────
+// Every name gets the same slot height and sits on the same baseline inside it, so plain
+// names line up perfectly. Names keep exactly the characters their owners chose; only
+// names that wouldn't fit adapt:
+//   - too wide for the column, or taller than the slot (stacked accent marks): shrink
+//   - poking above or below the slot (emoji, fancy letters): nudged back inside it
+// Emoji names used to get a 1.7x taller row, which left big gaps around them, and tall
+// names were allowed to overlap the next one.
 
-const EMOJI_RE = /[\u{1F300}-\u{1F9FF}\u{1FA00}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F000}-\u{1F02F}\u{1F0A0}-\u{1F0FF}\u{FE00}-\u{FE0F}\u{200D}\u{1F1E0}-\u{1F1FF}]/u;
+const SLOT_FILL = 0.95;   // visible text may use up to 95% of its slot's height
 
-function hasEmoji(str) {
-  return EMOJI_RE.test(str);
+function drawName(ctx, name, cx, slotTop, slotH, fontSize, maxW, minSize) {
+  let size = fontSize;
+  let m;
+  for (let i = 0; i < 20; i++) {
+    ctx.font = size + "px " + FONTS;
+    m = ctx.measureText(name);
+    const inkH = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent;
+    const scale = Math.min(1, maxW / Math.max(m.width, 1), (slotH * SLOT_FILL) / Math.max(inkH, 1));
+    if (scale >= 1 || size <= minSize) break;
+    size = Math.max(minSize, Math.floor(size * scale));
+  }
+
+  // Normal baseline: centre ordinary text ("Hg" = capitals plus descenders) in the slot.
+  const ref = ctx.measureText("Hg");
+  let baseline = slotTop + slotH / 2 + (ref.actualBoundingBoxAscent - ref.actualBoundingBoxDescent) / 2;
+
+  // Nudge anything that pokes out of its own slot back inside, so it never touches a
+  // neighbour.
+  const inkTop = baseline - m.actualBoundingBoxAscent;
+  const inkBottom = baseline + m.actualBoundingBoxDescent;
+  if (inkTop < slotTop) baseline += slotTop - inkTop;
+  else if (inkBottom > slotTop + slotH) baseline -= inkBottom - (slotTop + slotH);
+
+  ctx.fillText(name, cx, baseline);
 }
 
 // ── Render Supporters ───────────────────────────────────────────────────────
@@ -96,7 +123,7 @@ function renderSupporters(names) {
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = S_COLOR;
   ctx.textAlign = "center";
-  ctx.textBaseline = "top";
+  ctx.textBaseline = "alphabetic";
 
   const cols = S_COLS;
   const perCol = Math.ceil(names.length / cols);
@@ -110,50 +137,18 @@ function renderSupporters(names) {
   const colW   = availW / cols;
   const maxTextW = colW - 8;
 
-  // Font size based on even line height
-  const evenLineH = availH / perCol;
-  let fontSize = Math.floor(evenLineH * 0.7);
+  // One slot per row, the same height everywhere, so rows line up across columns
+  const slotH = availH / perCol;
+  let fontSize = Math.floor(slotH * 0.7);
   if (fontSize < 10) fontSize = 10;
   if (fontSize > 28) fontSize = 28;
-  const baseFont = fontSize + "px " + FONTS;
-
-  // Emoji multiplier: emoji lines get 1.7x height for breathing room
-  const EMOJI_MULT = 1.7;
 
   for (let c = 0; c < cols; c++) {
     const cx = marginSide + c * colW + colW / 2;
-
-    // Gather names for this column
-    const colNames = [];
     for (let r = 0; r < perCol; r++) {
       const i = c * perCol + r;
       if (i >= names.length) break;
-      colNames.push({ name: names[i], emoji: hasEmoji(names[i]) });
-    }
-
-    // Calculate adaptive line heights for this column
-    const numEmoji = colNames.filter(n => n.emoji).length;
-    const numNormal = colNames.length - numEmoji;
-    // Solve: availH = numNormal * baseH + numEmoji * baseH * EMOJI_MULT
-    const baseH = availH / (numNormal + numEmoji * EMOJI_MULT);
-
-    // Render each name at cumulative Y position
-    let y = marginTop;
-    for (const entry of colNames) {
-      const rowH = entry.emoji ? baseH * EMOJI_MULT : baseH;
-
-      // Full size font, only shrink for width overflow
-      ctx.font = baseFont;
-      const tw = ctx.measureText(entry.name).width;
-      if (tw > maxTextW) {
-        const shrunk = Math.max(8, Math.floor(fontSize * maxTextW / tw));
-        ctx.font = shrunk + "px " + FONTS;
-      }
-
-      // Centre text vertically within its row
-      const textY = y + (rowH - fontSize) / 2;
-      ctx.fillText(entry.name, cx, textY);
-      y += rowH;
+      drawName(ctx, names[i], cx, marginTop + r * slotH, slotH, fontSize, maxTextW, 8);
     }
   }
 
@@ -175,36 +170,22 @@ function renderBoosters(names) {
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = B_COLOR;
   ctx.textAlign = "center";
-  ctx.textBaseline = "top";
+  ctx.textBaseline = "alphabetic";
 
   const marginTop    = Math.round(H * 0.15);
   const marginBottom = Math.round(H * 0.10);
   const availH = H - marginTop - marginBottom;
   const cx = W / 2;
 
-  // Font size from even line height
-  const evenLineH = availH / Math.max(names.length, 1);
-  let fontSize = Math.floor(evenLineH * 0.65);
+  // One slot per name, all the same height
+  const slotH = availH / Math.max(names.length, 1);
+  let fontSize = Math.floor(slotH * 0.65);
   if (fontSize < 14) fontSize = 14;
   if (fontSize > 40) fontSize = 40;
 
-  const EMOJI_MULT = 1.7;
-
-  // Pre-scan for emojis
-  const entries = names.map(n => ({ name: n, emoji: hasEmoji(n) }));
-  const numEmoji = entries.filter(e => e.emoji).length;
-  const numNormal = entries.length - numEmoji;
-  const baseH = availH / (numNormal + numEmoji * EMOJI_MULT);
-
-  let y = marginTop;
-  for (const entry of entries) {
-    const rowH = entry.emoji ? baseH * EMOJI_MULT : baseH;
-
-    ctx.font = fontSize + "px " + FONTS;
-    const textY = y + (rowH - fontSize) / 2;
-    ctx.fillText(entry.name, cx, textY);
-    y += rowH;
-  }
+  names.forEach((name, i) => {
+    drawName(ctx, name, cx, marginTop + i * slotH, slotH, fontSize, W * 0.9, 10);
+  });
 
   console.log("[Poster] Boosters: font=" + fontSize + "px count=" + names.length);
   return canvas.toBuffer("image/png");
