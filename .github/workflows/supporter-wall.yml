@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     # Same image + font packages as the old Railway Dockerfile, so glyph
     # rendering (CJK, emoji, symbols) is byte-identical.
-    container: node:20-slim
+    container: node:24-bookworm-slim
     timeout-minutes: 15
     steps:
       - name: Install fonts
@@ -49,7 +49,7 @@ jobs:
             ca-certificates \
           && fc-cache -fv
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install dependencies
         run: npm install --no-save --no-audit --no-fund "@napi-rs/canvas@^0.1.65"
@@ -62,7 +62,7 @@ jobs:
       - name: Fetch supporter access list
         run: node fetch-access.js
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
@@ -75,4 +75,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
