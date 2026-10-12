@@ -1,4 +1,4 @@
-// render.js — Supporter wall PNG renderer (runs once, in GitHub Actions)
+// render.js: Supporter wall PNG renderer (runs once, in GitHub Actions)
 // Fetches supporter/booster names from the Cloudflare Worker and renders
 // supporters.png + boosters.png into ./site for GitHub Pages deployment.
 // Rendering logic is identical to the old Railway server.js.
@@ -204,7 +204,7 @@ async function main() {
   // Fail the run so the previous deployment stays live instead of
   // publishing blank walls.
   if (data.s.length === 0 && data.b.length === 0) {
-    throw new Error("No names returned from worker — keeping previous deployment");
+    throw new Error("No names returned from worker, keeping previous deployment");
   }
 
   fs.mkdirSync(OUT_DIR, { recursive: true });

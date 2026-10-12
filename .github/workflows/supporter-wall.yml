@@ -15,7 +15,7 @@ permissions:
   pages: write
   id-token: write
 
-# Never let two deployments race — this was the cause of the old
+# Never let two deployments race. This was the cause of the old
 # "pages build and deployment" failure emails.
 concurrency:
   group: pages
